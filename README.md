@@ -30,6 +30,22 @@ and of the Blender stills in `renders/`.
 | print it | `mechanical/wheelbot.stl` |
 | check a number | `SPEC.md` and `figure/model.mjs` — everything else reads them |
 
+## The machine in motion
+
+| Walking | The pan turret |
+|---|---|
+| ![The crawl: one foot at a time](renders/anim-walk.gif) | ![The turret carrying the phone through 70 degrees](renders/anim-turret.gif) |
+| One foot at a time, 0.75 duty, 42 mm stride. The wheels are locked while it steps, so a foot is a rigid point — a trot would drop it. | The phone rides a geared platter: cameras forward, ±70° of pan, so the same camera can look ahead, aside or back. |
+
+| Driving | Standing |
+|---|---|
+| ![Driving: the clutches released, the wheels turning](renders/anim-drive.gif) | ![Standing: the spring brake holding](renders/anim-stand.gif) |
+| The dog collars pulled clear: the wheels roll at 0.50 m/s and the hips trim the body level over bumps. | Brakes engaged with no power. A flat battery leaves it standing, not rolling. |
+
+Full clips, 1280×960 at 24 fps: [walk](renders/wheelbot7-walk.mp4) ·
+[drive](renders/wheelbot7-drive.mp4) · [turret](renders/wheelbot7-turret.mp4) ·
+[stand](renders/wheelbot7-stand.mp4)
+
 ## The numbers
 
 Computed by `figures/phonebot/model.mjs` and the bill; nothing here is typed in by hand.
