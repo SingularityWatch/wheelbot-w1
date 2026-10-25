@@ -1,0 +1,18 @@
+# renders: keep the stills, drop the animation frames (they are regenerated)
+renders/anim/*/
+!renders/anim/*.png
+
+# build by-products of the figure
+figures/*/shots/
+figures/*/3d/*.anim.json
+figures/*/marks.json
+
+# Blender
+*.blend1
+blender/__pycache__/
+__pycache__/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini

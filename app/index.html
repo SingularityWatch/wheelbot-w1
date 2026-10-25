@@ -1,0 +1,1280 @@
+<!doctype html>
+<!--
+  WHEELBOT W1 phone app — one file, no build, no CDN, works offline.
+  Open it from https://, http://localhost, or file:// and it still runs.
+
+  ?demo=1        force the built-in simulator (no hardware needed)
+  ?demo=0        force the real Web Bluetooth path
+  (default)      real Bluetooth when the browser has it, simulator otherwise
+
+  Real hardware: Chrome on Android (Web Bluetooth needs https or localhost).
+  iOS Safari has no Web Bluetooth, so it lands in demo mode automatically.
+
+  The wire format — 12-byte command frames with CRC16-CCITT, 20-byte
+  telemetry at 10 Hz — is documented in the script below, in the block
+  labelled "WHEELBOT W1 — phone app". Every frame the app sends is echoed
+  in hex at the bottom of the screen so a builder can diff it against a
+  serial log; window.WHEELBOT exposes the codec for console testing.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#0a0c0f">
+<title>WHEELBOT W1</title>
+<style>
+  :root{
+    --bg:#0a0c0f; --panel:#141920; --panel2:#1b222b; --line:#28323d;
+    --txt:#e8eef4; --dim:#8296a8; --dimmer:#5c6c7c;
+    --acc:#39d1b4; --drive:#3ad07a; --stand:#4aa8ff; --stow:#f0a02a;
+    --stop:#ff3b30; --warn:#ffb020;
+    --pad:14px;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%;margin:0;background:var(--bg);color:var(--txt);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    overscroll-behavior:none; -webkit-user-select:none; user-select:none;}
+  body{display:flex;justify-content:center;align-items:stretch;overflow:hidden}
+  #app{
+    position:relative;display:flex;flex-direction:column;gap:8px;
+    width:100%;max-width:430px;height:100dvh;max-height:100dvh;
+    padding:calc(6px + env(safe-area-inset-top)) 12px calc(6px + env(safe-area-inset-bottom));
+    overflow:hidden;
+  }
+  button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer;touch-action:manipulation}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+
+  /* ---------- header ---------- */
+  header{display:flex;align-items:center;gap:10px;height:44px;flex:0 0 auto}
+  .brand{display:flex;align-items:center;gap:8px;font-weight:700;letter-spacing:.14em;font-size:13px}
+  .brand svg{width:22px;height:22px;color:var(--acc)}
+  .brand b{color:var(--acc);font-weight:700}
+  .brand span{color:var(--dimmer);font-weight:600}
+  #btnConnect{
+    margin-left:auto;height:40px;padding:0 14px;border-radius:10px;
+    border:1px solid var(--line);background:var(--panel);font-size:12px;font-weight:700;
+    letter-spacing:.08em;display:flex;align-items:center;gap:7px;
+  }
+  #btnConnect .dot{width:8px;height:8px;border-radius:50%;background:var(--dimmer)}
+  #btnConnect.on{border-color:#1f5c4b;background:#0f2a24;color:#7ff0d4}
+  #btnConnect.on .dot{background:var(--acc);box-shadow:0 0 10px var(--acc)}
+  #btnConnect:disabled{opacity:.5}
+
+  /* ---------- status strip ---------- */
+  #status{
+    flex:0 0 auto;display:flex;align-items:center;gap:8px;height:26px;
+    font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--dim);
+  }
+  .pill{display:inline-flex;align-items:center;gap:6px;height:20px;padding:0 8px;
+    border-radius:6px;font-size:10px;font-weight:800;letter-spacing:.1em}
+  .pill.demo{background:#3a2a06;color:#ffc247;border:1px solid #6b4d08}
+  .pill.live{background:#0c2a20;color:#57e3b8;border:1px solid #1c5c49}
+  .pill.idle{background:#1a222c;color:#93a6b8;border:1px solid #2b3644}
+  #statusText{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dimmer)}
+  #linkLed{width:7px;height:7px;border-radius:50%;background:#3a4653;flex:0 0 auto}
+  #linkLed.ok{background:var(--acc);box-shadow:0 0 8px var(--acc)}
+
+  /* ---------- safety banner ---------- */
+  #banner{
+    position:absolute;left:12px;right:12px;top:calc(56px + env(safe-area-inset-top));z-index:40;
+    display:none;align-items:center;gap:10px;padding:11px 13px;border-radius:11px;
+    background:linear-gradient(180deg,#ff2d22,#c81a12);color:#fff;
+    font-size:12.5px;font-weight:800;letter-spacing:.03em;
+    box-shadow:0 10px 30px rgba(255,45,34,.35);border:1px solid #ff6a60;
+    animation:flash 1s steps(2,end) infinite;
+  }
+  #banner.show{display:flex}
+  #banner svg{width:18px;height:18px;flex:0 0 auto}
+  @keyframes flash{50%{filter:brightness(.82)}}
+
+  /* ---------- telemetry ---------- */
+  #telem{flex:0 0 auto;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:10px 12px 11px;transition:opacity .2s}
+  #telem.stale{opacity:.45}
+  .trow{display:flex;align-items:center}
+  .trow+.trow{margin-top:9px}
+  #modeBig{font-size:19px;font-weight:800;letter-spacing:.06em}
+  #modeBig[data-m="0"]{color:var(--stand)} #modeBig[data-m="1"]{color:var(--drive)} #modeBig[data-m="2"]{color:var(--stow)}
+  .sub{font-size:10px;letter-spacing:.11em;color:var(--dimmer);text-transform:uppercase}
+  .brakes{margin-left:auto;display:flex;align-items:center;gap:9px}
+  .brakes .lbl{font-size:10px;letter-spacing:.1em;color:var(--dim)}
+  .brakes .dots{display:flex;gap:6px}
+  .bdot{width:12px;height:12px;border-radius:50%;border:1.5px solid #3b4a59;background:#1a232c;transition:background .15s,border-color .15s,box-shadow .15s}
+  .bdot.on{background:var(--acc);border-color:var(--acc);box-shadow:0 0 8px rgba(57,209,180,.5)}
+  .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-top:9px}
+  .cell{background:var(--panel2);border-radius:9px;padding:6px 7px 7px;min-width:0}
+  .cell .k{font-size:9px;letter-spacing:.09em;color:var(--dimmer);text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .cell .v{font-size:14px;font-weight:700;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .cell .v small{font-size:9px;font-weight:600;color:var(--dim);margin-left:2px}
+  .cell.stale .v{color:var(--dimmer)}
+  #rpmRow{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-top:7px}
+  .rpm{display:flex;align-items:center;gap:5px;font-size:10px;color:var(--dim)}
+  .rpm i{width:4px;height:4px;border-radius:50%;background:#3b4a59;display:block}
+  .rpm span{font-variant-numeric:tabular-nums;font-weight:700;color:var(--txt);font-size:11px}
+  .rpm em{font-style:normal;font-weight:800;color:var(--dimmer);font-size:9px}
+
+  /* ---------- camera ---------- */
+  #camPanel{
+    flex:0 0 auto;display:flex;align-items:center;gap:10px;height:74px;
+    background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:7px;position:relative;overflow:hidden;
+  }
+  #camBox{position:relative;width:106px;height:58px;border-radius:8px;overflow:hidden;background:#05070a;flex:0 0 auto;display:grid;place-items:center}
+  #camVideo{width:100%;height:100%;object-fit:cover;display:none;background:#000}
+  #camPanel.live #camVideo{display:block}
+  #camPanel.live #camIdle{display:none}
+  #camIdle{display:flex;flex-direction:column;align-items:center;gap:3px;color:var(--dimmer);font-size:9px;letter-spacing:.1em}
+  #camIdle svg{width:18px;height:18px}
+  #camMeta{flex:1;min-width:0}
+  #camTitle{font-size:11px;font-weight:800;letter-spacing:.1em;color:var(--txt);display:flex;align-items:center;gap:6px}
+  #camTitle .rec{width:6px;height:6px;border-radius:50%;background:var(--stop);display:none}
+  #camPanel.live #camTitle .rec{display:block;box-shadow:0 0 8px var(--stop)}
+  #camMsg{font-size:10px;color:var(--dimmer);margin-top:3px;line-height:1.3;max-height:26px;overflow:hidden}
+  #camBtns{display:flex;gap:6px;flex:0 0 auto}
+  .cbtn{height:38px;min-width:56px;padding:0 9px;border-radius:9px;background:var(--panel2);
+    border:1px solid var(--line);font-size:10px;font-weight:800;letter-spacing:.07em;color:#cfe0ee}
+  .cbtn:active{background:#232d38}
+  .cbtn.shot{border-color:#7a2e2a;color:#ff9a92}
+  #shotFlash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none;transition:opacity .12s}
+
+  /* ---------- joystick ---------- */
+  #joyWrap{flex:1 1 0;min-height:0;display:flex;align-items:center;justify-content:center;position:relative;padding:2px 0}
+  #pad{
+    position:relative;height:100%;width:auto;aspect-ratio:1;
+    max-height:330px;max-width:100%;border-radius:50%;
+    background:radial-gradient(circle at 50% 42%,#1a222c 0%,#111720 62%,#0d1218 100%);
+    border:1px solid #2a3644;touch-action:none;overflow:hidden;
+    box-shadow:inset 0 0 40px rgba(0,0,0,.55);
+  }
+  #pad.off{opacity:.42;filter:grayscale(.6)}
+  #pad .ring{position:absolute;inset:0;border-radius:50%;pointer-events:none}
+  #pad .cross:before,#pad .cross:after{content:"";position:absolute;background:#26313c}
+  #pad .cross:before{left:50%;top:12%;bottom:12%;width:1px;margin-left:-.5px}
+  #pad .cross:after{top:50%;left:12%;right:12%;height:1px;margin-top:-.5px}
+  #pad .dead{position:absolute;left:50%;top:50%;width:26%;height:26%;transform:translate(-50%,-50%);
+    border:1px dashed #2c3846;border-radius:50%}
+  #pad .axis{position:absolute;font-size:9px;letter-spacing:.14em;color:#465565;pointer-events:none}
+  #pad .axis.up{top:7%;left:50%;transform:translateX(-50%)}
+  #pad .axis.dn{bottom:7%;left:50%;transform:translateX(-50%)}
+  #pad .axis.lf{left:7%;top:50%;transform:translateY(-50%)}
+  #pad .axis.rt{right:7%;top:50%;transform:translateY(-50%)}
+  #knob{
+    position:absolute;left:50%;top:50%;width:31%;height:31%;border-radius:50%;
+    transform:translate(-50%,-50%);pointer-events:none;
+    background:radial-gradient(circle at 42% 34%,#3d5568,#22303d 62%,#18222c);
+    border:1px solid #4a6072;box-shadow:0 6px 18px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.12);
+    transition:box-shadow .15s,border-color .15s;
+  }
+  #pad.active #knob{border-color:var(--acc);box-shadow:0 0 24px rgba(57,209,180,.35),inset 0 1px 0 rgba(255,255,255,.14)}
+  #joyHint{position:absolute;left:0;right:0;bottom:-2px;text-align:center;font-size:9.5px;letter-spacing:.1em;
+    color:var(--dimmer);text-transform:uppercase}
+  #pad[data-lock="1"]{cursor:not-allowed}
+
+  /* ---------- ride height ---------- */
+  #rideRow{flex:0 0 auto;display:flex;align-items:center;gap:10px;background:var(--panel);
+    border:1px solid var(--line);border-radius:12px;padding:8px 12px;height:52px}
+  #rideRow .cap{font-size:9.5px;letter-spacing:.1em;color:var(--dimmer);text-transform:uppercase;flex:0 0 auto;width:38px;line-height:1.25}
+  #ride{flex:1;-webkit-appearance:none;appearance:none;height:26px;background:transparent;margin:0}
+  #ride::-webkit-slider-runnable-track{height:8px;border-radius:4px;background:linear-gradient(90deg,#1d2732,#2b3947)}
+  #ride::-moz-range-track{height:8px;border-radius:4px;background:linear-gradient(90deg,#1d2732,#2b3947)}
+  #ride::-webkit-slider-thumb{-webkit-appearance:none;width:26px;height:26px;border-radius:50%;
+    background:radial-gradient(circle at 40% 35%,#bff8ea,#39d1b4 60%,#1c8b78);margin-top:-9px;
+    border:2px solid #0b0f13;box-shadow:0 2px 10px rgba(0,0,0,.5)}
+  #ride::-moz-range-thumb{width:24px;height:24px;border:2px solid #0b0f13;border-radius:50%;
+    background:radial-gradient(circle at 40% 35%,#bff8ea,#39d1b4 60%,#1c8b78)}
+  #ride:disabled{opacity:.4}
+  #rideVal{font-size:13px;font-weight:800;width:52px;text-align:right;font-variant-numeric:tabular-nums}
+  #lvBtn{flex:0 0 auto;height:38px;padding:0 10px;border-radius:8px;border:1px solid var(--line);
+    background:var(--panel2);font-size:10px;font-weight:800;letter-spacing:.06em;color:#93a6b8}
+  #lvBtn.on{background:#0f2a24;border-color:#1f5c4b;color:#7ff0d4}
+
+  /* ---------- mode buttons + stop ---------- */
+  #modes{flex:0 0 auto;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;height:58px}
+  .mbtn{position:relative;border-radius:12px;border:1px solid var(--line);background:var(--panel);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+    font-size:12px;font-weight:800;letter-spacing:.09em;color:#c2d3e2;overflow:hidden}
+  .mbtn small{font-size:8.5px;font-weight:600;color:var(--dimmer);letter-spacing:.07em}
+  .mbtn:active{transform:scale(.985)}
+  .mbtn[data-active="1"]{color:#0a0c0f}
+  .mbtn[data-active="1"] small{color:rgba(0,0,0,.55)}
+  #mStand[data-active="1"]{background:var(--stand);border-color:var(--stand)}
+  #mDrive[data-active="1"]{background:var(--drive);border-color:var(--drive)}
+  #mStow[data-active="1"]{background:var(--stow);border-color:var(--stow)}
+  .mbtn:disabled{opacity:.4}
+
+  #stopBtn{
+    flex:0 0 auto;height:56px;border-radius:13px;background:linear-gradient(180deg,#ff4136,#c81f14);
+    border:1px solid #ff6a60;color:#fff;font-weight:900;letter-spacing:.16em;font-size:15px;
+    display:flex;align-items:center;justify-content:center;gap:9px;
+    box-shadow:0 6px 20px rgba(255,59,48,.28),inset 0 1px 0 rgba(255,255,255,.22);
+  }
+  #stopBtn:active{transform:translateY(1px);background:linear-gradient(180deg,#e5332a,#a8160d)}
+  #stopBtn svg{width:20px;height:20px}
+  #stopBtn.armed{animation:flash 1.1s steps(2,end) infinite}
+
+  /* ---------- debug ---------- */
+  #debug{flex:0 0 auto;display:flex;align-items:center;gap:8px;height:20px;font-size:9.5px;color:var(--dimmer)}
+  #txHex{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;letter-spacing:.04em}
+  #txHex b{color:#8fb3c9;font-weight:700}
+  #dbgRate{flex:0 0 auto;letter-spacing:.06em}
+  #simDrop{flex:0 0 auto;display:none;color:#c99a3a;letter-spacing:.06em;text-decoration:underline;font-size:9.5px}
+  #simDrop.show{display:block}
+
+  /* ---------- modal ---------- */
+  #modal{position:fixed;inset:0;z-index:60;display:none;align-items:center;justify-content:center;
+    background:rgba(4,6,9,.72);backdrop-filter:blur(3px);padding:22px}
+  #modal.show{display:flex}
+  .sheet{width:100%;max-width:340px;background:#151b23;border:1px solid #2c3743;border-radius:16px;
+    padding:18px 18px 14px;box-shadow:0 24px 60px rgba(0,0,0,.6)}
+  .sheet h2{margin:0 0 8px;font-size:16px;letter-spacing:.02em}
+  .sheet p{margin:0 0 16px;font-size:12.5px;line-height:1.45;color:#a7bacb}
+  .sheet .row{display:flex;gap:9px}
+  .sheet .row button{flex:1;height:46px;border-radius:10px;font-size:12px;font-weight:800;letter-spacing:.08em;border:1px solid var(--line);background:var(--panel2)}
+  .sheet .row button.primary{background:var(--stow);border-color:var(--stow);color:#0a0c0f}
+
+  /* camera fullscreen-ish */
+  #camPanel.big{position:fixed;left:0;right:0;bottom:0;top:0;z-index:55;height:auto;border-radius:0;
+    flex-direction:column;justify-content:flex-end;gap:12px;padding:16px;background:#05070a;border:0}
+  #camPanel.big #camBox{width:100%;height:auto;flex:1 1 auto;border-radius:12px}
+  #camPanel.big #camMeta{flex:0 0 auto}
+  #camPanel.big #camMsg{max-height:none;font-size:12px}
+  #camPanel.big #camBtns{width:100%}
+  #camPanel.big .cbtn{flex:1;height:52px;font-size:12px}
+  #camPanel.big #camIdle{font-size:12px}
+
+  @media (max-height:740px){
+    #camPanel{height:62px}
+    #camBox{width:88px;height:46px}
+    .cell .v{font-size:13px}
+    #telem{padding:8px 10px 9px}
+  }
+  /* short phones (640-class): everything compresses, the stick gives up the rest */
+  @media (max-height:700px){
+    #app{gap:6px}
+    header{height:38px}
+    #status{height:22px;font-size:10px}
+    #telem{padding:7px 9px 8px}
+    #modeBig{font-size:16px}
+    .cell{padding:4px 6px 5px}
+    .cell .v{font-size:13px}
+    .grid{gap:6px;margin-top:7px}
+    #rpmRow{margin-top:5px}
+    #camPanel{height:54px;padding:5px}
+    #camBox{width:76px;height:42px}
+    #camMsg{font-size:9px;max-height:22px}
+    .cbtn{height:34px;min-width:48px;padding:0 7px;font-size:9px}
+    #rideRow{height:46px;padding:5px 10px}
+    #ride{height:22px}
+    #modes{height:50px}
+    .mbtn{font-size:11px}
+    .mbtn small{font-size:8px}
+    #stopBtn{height:50px;font-size:14px}
+    #debug{height:16px;font-size:9px}
+  }
+  @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <header>
+    <div class="brand">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M4 13.5a2.5 2.5 0 1 0 5 0 2.5 2.5 0 1 0-5 0M15 13.5a2.5 2.5 0 1 0 5 0 2.5 2.5 0 1 0-5 0"/>
+        <path d="M6.4 11.3 8.5 6.8h7l2.1 4.5M3 17.5h18M8.5 6.8V4.6h7v2.2"/>
+      </svg>
+      <b>WHEELBOT</b> <span>W1</span>
+    </div>
+    <button id="btnConnect" aria-label="Connect to robot"><span class="dot"></span><span id="connectLabel">CONNECT</span></button>
+  </header>
+
+  <div id="status">
+    <span id="modePill" class="pill idle">OFFLINE</span>
+    <span id="linkLed"></span>
+    <span id="statusText">no link</span>
+  </div>
+
+  <div id="banner" role="alert">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 2.5 20h19L12 3Z"/><path d="M12 9v5M12 17.2v.1"/></svg>
+    <span id="bannerText">TELEMETRY LOST — MOTORS STOPPED</span>
+  </div>
+
+  <section id="telem" aria-label="Telemetry">
+    <div class="trow">
+      <div>
+        <div class="sub">mode</div>
+        <div id="modeBig" data-m="-1">—</div>
+      </div>
+      <div class="brakes">
+        <span class="lbl">BRAKES</span>
+        <span class="dots" id="brakeDots">
+          <span class="bdot" data-i="0"></span><span class="bdot" data-i="1"></span>
+          <span class="bdot" data-i="2"></span><span class="bdot" data-i="3"></span>
+        </span>
+        <span class="lbl mono" id="brakeTxt">0/4</span>
+      </div>
+    </div>
+    <div class="grid">
+      <div class="cell"><div class="k">ride h</div><div class="v"><span id="vHeight">—</span><small>mm</small></div></div>
+      <div class="cell"><div class="k">pitch</div><div class="v"><span id="vPitch">—</span><small>°</small></div></div>
+      <div class="cell"><div class="k">roll</div><div class="v"><span id="vRoll">—</span><small>°</small></div></div>
+      <div class="cell"><div class="k">pack</div><div class="v"><span id="vVolt">—</span><small>V</small></div></div>
+    </div>
+    <div class="grid" style="grid-template-columns:1fr 1fr;margin-top:7px">
+      <div class="cell"><div class="k">current</div><div class="v"><span id="vAmp">—</span><small>A</small></div></div>
+      <div class="cell"><div class="k">cmd</div><div class="v mono" style="font-size:12px"><span id="vCmd">idle</span></div></div>
+    </div>
+    <div id="rpmRow">
+      <div class="rpm"><em>FL</em><i></i><span id="rpm0">0</span></div>
+      <div class="rpm"><em>FR</em><i></i><span id="rpm1">0</span></div>
+      <div class="rpm"><em>RL</em><i></i><span id="rpm2">0</span></div>
+      <div class="rpm"><em>RR</em><i></i><span id="rpm3">0</span></div>
+    </div>
+  </section>
+
+  <section id="camPanel" aria-label="Camera">
+    <div id="camBox">
+      <video id="camVideo" playsinline muted autoplay></video>
+      <div id="camIdle">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5A1.5 1.5 0 0 1 4.5 7h2L8 5h8l1.5 2h2A1.5 1.5 0 0 1 21 8.5v9A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5v-9Z"/><circle cx="12" cy="13" r="3.4"/></svg>
+        <span>NO CAM</span>
+      </div>
+      <div id="shotFlash"></div>
+    </div>
+    <div id="camMeta">
+      <div id="camTitle"><span class="rec"></span>CAMERA</div>
+      <div id="camMsg">Rear camera · off</div>
+    </div>
+    <div id="camBtns">
+      <button class="cbtn" id="camToggle">CAM ON</button>
+      <button class="cbtn shot" id="camShot" disabled>SHOT</button>
+    </div>
+  </section>
+
+  <section id="joyWrap">
+    <div id="pad" data-lock="1">
+      <div class="ring cross"></div>
+      <div class="dead"></div>
+      <span class="axis up">FWD</span><span class="axis dn">REV</span>
+      <span class="axis lf">L</span><span class="axis rt">R</span>
+      <div id="knob"></div>
+    </div>
+    <div id="joyHint">drive mode to unlock</div>
+  </section>
+
+  <div id="rideRow">
+    <span class="cap">height</span>
+    <input id="ride" type="range" min="79" max="91" step="1" value="88" aria-label="Ride height">
+    <span id="rideVal">88<span style="font-size:9px;color:#8296a8"> mm</span></span>
+    <button id="lvBtn" class="on" aria-pressed="true">LEVEL</button>
+  </div>
+
+  <div id="modes">
+    <button class="mbtn" id="mStand" data-active="0">STAND<small>brakes on</small></button>
+    <button class="mbtn" id="mDrive" data-active="0">DRIVE<small>brakes off</small></button>
+    <button class="mbtn" id="mStow" data-active="0">STOW<small>hold to confirm</small></button>
+  </div>
+
+  <button id="stopBtn">
+    <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+    STOP
+  </button>
+
+  <div id="debug" class="mono">
+    <span id="txHex"><b>TX</b> —</span>
+    <span id="dbgRate">0 Hz</span>
+    <button id="simDrop">sim link drop</button>
+  </div>
+</div>
+
+<div id="modal">
+  <div class="sheet">
+    <h2 id="modalTitle">Confirm</h2>
+    <p id="modalBody"></p>
+    <div class="row">
+      <button id="modalNo">CANCEL</button>
+      <button id="modalYes" class="primary">CONFIRM</button>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+/* ==========================================================================
+   WHEELBOT W1 — phone app (single file, no dependencies, works offline)
+   ==========================================================================
+   BLE (West African naming from the Nordic UART clone used by the firmware):
+     service  6e400001-b5a3-f393-e0a9-e50e24dcca9e
+     RX       6e400002-...  write  (phone -> robot)
+     TX       6e400003-...  notify (robot -> phone)
+
+   COMMAND FRAME — fixed 12 bytes, little endian (SPEC.md "BLE protocol")
+     off  size  field
+     0    1     type      0x01 drive | 0x02 mode | 0x03 trim | 0x04 config
+     1    1     arg0      drive: speed, int8, mm/s, negative = reverse
+                          mode : 0 stand | 1 drive | 2 stow
+                          trim : hip index 0 FL, 1 FR, 2 RL, 3 RR
+     2    1     arg1      drive: steer, uint8, 0..255 with 128 = straight
+                          trim : angle offset, int8, degrees (signed)
+     3    1     flags     bit0 brakes forced | bit1 leveling on | bit2 buzzer
+     4    4     u32 LE    nonce, echoed in the ack
+     8    2     u16 LE    CRC16-CCITT (poly 0x1021, init 0xFFFF) over bytes 0..7
+     10   2     —         reserved, zero
+
+   TELEMETRY FRAME — 20 bytes, little endian, 10 Hz
+     0    1     mode        0 stand | 1 drive | 2 stow
+     1    1     brake mask  bit0..3 = FL FR RL RR engaged (1 = dog seated)
+     2    2     u16 LE      ride height, mm
+     4    2     i16 LE      pitch, 0.1 deg
+     6    2     i16 LE      roll,  0.1 deg
+     8    2     u16 LE      pack, millivolts
+     10   2     i16 LE      current, milliamps (negative = regen)
+     12   4     i8 x4       wheel rpm FL FR RL RR
+     16   2     u16 LE      fault bits: 0 low pack, 1 brake fault, 2 imu, 3 stall
+     18   2     —           reserved
+
+   The int8 speed field caps the app's joystick at 127 mm/s even though the
+   hardware reaches 503 mm/s. That is what the spec's byte layout allows; if
+   the firmware ever widens it, change SPEED_MAX_MMS and the wire type together.
+   ========================================================================== */
+
+/* ---------------- protocol: pure functions ---------------- */
+const SVC = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+const CH_RX = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
+const CH_TX = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
+
+const T_DRIVE = 0x01, T_MODE = 0x02, T_TRIM = 0x03, T_CONFIG = 0x04;
+const F_BRAKES = 0x01, F_LEVEL = 0x02, F_BUZZ = 0x04;
+const MODE_STAND = 0, MODE_DRIVE = 1, MODE_STOW = 2;
+const MODE_NAME = ["STAND", "DRIVE", "STOW"];
+
+const SPEED_MAX_MMS = 127;      /* int8 on the wire */
+const STEER_MID = 128;
+const H_MIN = 79, H_MAX = 91, H_STANCE = 88, L_ARM = 68, AXLE_Z = 24;
+
+/** CRC16-CCITT, poly 0x1021, init 0xFFFF, no reflection, no xorout. */
+function crc16ccitt(bytes, len) {
+  let crc = 0xFFFF;
+  for (let i = 0; i < len; i++) {
+    crc ^= (bytes[i] & 0xFF) << 8;
+    for (let b = 0; b < 8; b++) {
+      crc = (crc & 0x8000) ? ((crc << 1) ^ 0x1021) & 0xFFFF : (crc << 1) & 0xFFFF;
+    }
+  }
+  return crc & 0xFFFF;
+}
+
+/** Build one 12-byte command frame. Speed/offset are clamped to int8. */
+function buildFrame(type, arg0, arg1, flags, nonce) {
+  const f = new Uint8Array(12);
+  f[0] = type & 0xFF;
+  f[1] = type === T_DRIVE || type === T_TRIM ? (arg0 << 24 >> 24) & 0xFF : arg0 & 0xFF;
+  f[2] = type === T_TRIM ? (arg1 << 24 >> 24) & 0xFF : arg1 & 0xFF;
+  f[3] = flags & 0x07;
+  f[4] = nonce & 0xFF; f[5] = (nonce >>> 8) & 0xFF;
+  f[6] = (nonce >>> 16) & 0xFF; f[7] = (nonce >>> 24) & 0xFF;
+  const crc = crc16ccitt(f, 8);
+  f[8] = crc & 0xFF; f[9] = (crc >> 8) & 0xFF;
+  return f;
+}
+
+function driveFrame(speedMmS, steerU8, flags, nonce) {
+  const s = Math.max(-SPEED_MAX_MMS, Math.min(SPEED_MAX_MMS, Math.round(speedMmS)));
+  const st = Math.max(0, Math.min(255, Math.round(steerU8)));
+  return buildFrame(T_DRIVE, s, st, flags, nonce);
+}
+function modeFrame(mode, flags, nonce) { return buildFrame(T_MODE, mode & 0x03, 0, flags, nonce); }
+function trimFrame(hip, offsetDeg, flags, nonce) {
+  const o = Math.max(-45, Math.min(45, Math.round(offsetDeg)));
+  return buildFrame(T_TRIM, hip & 0x03, o, flags, nonce);
+}
+
+/** Decode a 20-byte telemetry frame; returns null when the length is wrong. */
+function decodeTelemetry(b) {
+  if (!b || b.length < 20) return null;
+  const i16 = (o) => (b[o] | (b[o + 1] << 8)) << 16 >> 16;
+  const u16 = (o) => b[o] | (b[o + 1] << 8);
+  return {
+    mode: b[0], brakes: b[1] & 0x0F,
+    height: u16(2), pitch: i16(4) / 10, roll: i16(6) / 10,
+    pack_mV: u16(8), current_mA: i16(10),
+    rpm: [(b[12] << 24) >> 24, (b[13] << 24) >> 24, (b[14] << 24) >> 24, (b[15] << 24) >> 24],
+    faults: u16(16),
+  };
+}
+
+/** Encode telemetry — used by the simulator so both paths carry identical bytes. */
+function encodeTelemetry(t) {
+  const b = new Uint8Array(20);
+  const u16 = (o, v) => { v = Math.max(0, Math.min(0xFFFF, Math.round(v))); b[o] = v & 0xFF; b[o + 1] = (v >> 8) & 0xFF; };
+  const i16 = (o, v) => { v = Math.max(-32768, Math.min(32767, Math.round(v))); u16(o, v & 0xFFFF); };
+  const i8 = (o, v) => { b[o] = Math.max(-128, Math.min(127, Math.round(v))) & 0xFF; };
+  b[0] = t.mode & 0x03;
+  b[1] = t.brakes & 0x0F;
+  u16(2, t.height); i16(4, t.pitch * 10); i16(6, t.roll * 10);
+  u16(8, t.pack_mV); i16(10, t.current_mA);
+  for (let i = 0; i < 4; i++) i8(12 + i, t.rpm[i]);
+  u16(16, t.faults || 0);
+  return b;
+}
+
+const hex = (b) => Array.from(b, (x) => x.toString(16).toUpperCase().padStart(2, "0")).join(" ");
+
+/* ---------------- geometry helpers ---------------- */
+const thetaFor = (h) => Math.acos(Math.max(-1, Math.min(1, (h - AXLE_Z) / L_ARM))) * 180 / Math.PI;
+const thetaStance = thetaFor(H_STANCE);
+const trimOffsetFor = (h) => thetaFor(h) - thetaStance;   /* negative = taller */
+
+/* ==========================================================================
+   SIMULATOR — behaves like the firmware so the page is demonstrable
+   ========================================================================== */
+class Sim {
+  constructor() {
+    this.mode = MODE_STAND;
+    this.brakePos = [0, 0, 0, 0];       /* mm of release travel, 6 = fully clear */
+    this.rpm = [0, 0, 0, 0];
+    this.speed = 0;                     /* commanded mm/s */
+    this.steer = STEER_MID;
+    this.theta = [thetaStance, thetaStance, thetaStance, thetaStance];
+    this.thetaTarget = thetaStance;
+    this.leveling = true;
+    this.forced = false;
+    this.pack_mV = 8300;
+    this.soc = 1;
+    this.current_mA = 130;
+    this.pitch = 0; this.roll = 0;
+    this.t = 0; this.txCount = 0;
+    this.dead = false;                  /* link-drop rehearsal */
+    this.onFrame = null;
+  }
+
+  /* Same entry point as the BLE write path. */
+  write(bytes) {
+    if (this.dead) return;
+    this.txCount++;
+    const nonce = (bytes[4] | (bytes[5] << 8) | (bytes[6] << 16) | (bytes[7] << 24)) >>> 0;
+    this.lastNonce = nonce;
+    const s8 = (v) => (v << 24) >> 24;               /* int8 on the wire */
+    const type = bytes[0], a0 = s8(bytes[1]), a1 = s8(bytes[2]), flags = bytes[3];
+    this.leveling = !!(flags & F_LEVEL);
+    if (type === T_DRIVE) {
+      this.forced = !!(flags & F_BRAKES);
+      this.speed = this.forced ? 0 : a0;
+      this.steer = bytes[2];                         /* steer is unsigned 0..255 */
+      if (!this.forced && this.mode !== MODE_DRIVE) this.mode = MODE_DRIVE;  /* firmware: driving implies drive mode */
+    } else if (type === T_MODE) {
+      this.forced = !!(flags & F_BRAKES);
+      this.mode = a0 & 0x03;
+      if (this.mode !== MODE_DRIVE) { this.speed = 0; this.steer = STEER_MID; }
+      this.thetaTarget = this.mode === MODE_STOW ? 125 : thetaStance;
+    } else if (type === T_TRIM) {
+      const hip = a0 & 0x03;
+      const target = Math.max(8, Math.min(125, thetaStance + a1));
+      this.theta[hip] = target;
+      if (hip === 3) this.thetaTarget = target;      /* all four hips follow the last trim */
+    }
+  }
+
+  tick(dt) {
+    this.t += dt;
+    const wantDrive = this.mode === MODE_DRIVE && !this.forced && !this.dead;
+
+    /* brakes: 6 mm of travel in 0.35 s — the SG90 pulls, the spring pushes back */
+    const BRAKE_RATE = 6 / 0.35;
+    for (let i = 0; i < 4; i++) {
+      const target = wantDrive ? 6 : 0;
+      const d = target - this.brakePos[i];
+      const step = Math.sign(d) * Math.min(Math.abs(d), BRAKE_RATE * dt);
+      this.brakePos[i] += step;
+    }
+    const released = this.brakePos.every((p) => p > 5.5);
+
+    /* hips slew at ~40 deg/s toward the trim target (stow goes to 125) */
+    const hipTarget = this.mode === MODE_STOW ? 125 : this.thetaTarget;
+    for (let i = 0; i < 4; i++) {
+      const d = hipTarget - this.theta[i];
+      this.theta[i] += Math.sign(d) * Math.min(Math.abs(d), 40 * dt);
+    }
+
+    /* wheel spin-up / coast-down, 0.25 s time constant */
+    const v = (wantDrive && released) ? this.speed : 0;
+    const k = Math.min(1, dt / 0.25);
+    const base = v * 60 / (Math.PI * 48);       /* mm/s -> rpm */
+    const turn = (this.steer - STEER_MID) / 127; /* -1 .. 1 */
+    const targets = [base * (1 - turn), base * (1 + turn), base * (1 - turn), base * (1 + turn)];
+    for (let i = 0; i < 4; i++) this.rpm[i] += (targets[i] - this.rpm[i]) * k;
+
+    /* body attitude: leveling drives pitch/roll to zero, else the deck sags */
+    const sp = Math.abs(v) / SPEED_MAX_MMS;
+    const tp = this.leveling ? 0 : (1.9 + sp * 1.4);
+    const tr = this.leveling ? 0 : (-1.3 - Math.abs(turn) * 2.2);
+    const noise = Math.sin(this.t * 7.3) * 0.09 + Math.sin(this.t * 2.1) * 0.05;
+    this.pitch += (tp + noise - this.pitch) * Math.min(1, dt / 0.6);
+    this.roll += (tr + noise * 0.7 - this.roll) * Math.min(1, dt / 0.6);
+
+    /* current: idle + traction + servo transients + hip load */
+    let mA = 120 + Math.abs(v) * 7.5;
+    for (let i = 0; i < 4; i++) {
+      if (Math.abs((wantDrive ? 6 : 0) - this.brakePos[i]) > 0.05) mA += 210;
+    }
+    if (Math.abs(hipTarget - this.theta[0]) > 0.4) mA += 170;
+    this.current_mA = Math.round(mA + Math.sin(this.t * 11) * 18);
+
+    /* pack: 25.9 Wh, drained 90x faster than real time so a demo shows it */
+    const W = this.pack_mV / 1000 * (this.current_mA / 1000);
+    this.soc = Math.max(0, this.soc - (W / 25.9) * dt * 90 / 3600);
+    this.pack_mV = 6000 + 2300 * this.soc;
+
+    this.height = this.mode === MODE_STOW
+      ? 9 + Math.max(0, this.theta[0] - 100) * 0.1
+      : Math.max(0, AXLE_Z + L_ARM * Math.cos(this.theta[0] * Math.PI / 180));
+  }
+
+  telemetry() {
+    let mask = 0;
+    for (let i = 0; i < 4; i++) if (this.brakePos[i] < 0.6) mask |= (1 << i);
+    return {
+      mode: this.mode, brakes: mask,
+      height: Math.round(this.height || H_STANCE),
+      pitch: this.pitch, roll: this.roll,
+      pack_mV: Math.round(this.pack_mV), current_mA: this.current_mA,
+      rpm: this.rpm.map((r) => Math.round(r)),
+      faults: this.pack_mV < 6300 ? 0x0001 : 0,
+    };
+  }
+}
+
+/* ==========================================================================
+   LINK layer — real BLE or the simulator, same interface
+   ========================================================================== */
+const link = {
+  kind: "none",            /* "ble" | "sim" */
+  ready: false,
+  device: null, rx: null, tx: null,
+  sim: null,
+  onTelem: null,
+  onDown: null,
+};
+
+function simLink() {
+  if (!link.sim) link.sim = new Sim();
+  link.kind = "sim";
+  link.ready = true;
+  return link.sim;
+}
+
+async function bleConnect() {
+  if (!navigator.bluetooth) throw new Error("Web Bluetooth is not available in this browser");
+  let device;
+  try {
+    device = await navigator.bluetooth.requestDevice({
+      filters: [{ namePrefix: "WHEELBOT" }, { services: [SVC] }],
+      optionalServices: [SVC],
+    });
+  } catch (e) {
+    if (e && (e.name === "NotFoundError") && e.message && /no devices/i.test(e.message)) {
+      /* Nothing matched the prefix — let the builder pick from the full list. */
+      device = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: [SVC] });
+    } else { throw e; }
+  }
+  device.addEventListener("gattserverdisconnected", () => {
+    if (link.kind === "ble" && link.device === device) hardDisconnect("robot disconnected");
+  });
+  const server = await device.gatt.connect();
+  if (device.gatt.requestMTU) { try { await device.gatt.requestMTU(64); } catch (_) {} }
+  const svc = await server.getPrimaryService(SVC);
+  const rx = await svc.getCharacteristic(CH_RX);
+  const tx = await svc.getCharacteristic(CH_TX);
+  tx.addEventListener("characteristicvaluechanged", (ev) => {
+    const dv = ev.target.value;
+    const bytes = new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength);
+    if (link.onTelem) link.onTelem(bytes);
+  });
+  await tx.startNotifications();
+
+  link.kind = "ble"; link.device = device; link.rx = rx; link.tx = tx;
+
+  /* MTU may have been negotiated after connecting: 12 bytes always fit in the
+     default 20-byte payload, so nothing to chunk. */
+  link.ready = true;
+}
+
+function linkWrite(bytes) {
+  if (!link.ready) return;
+  if (link.kind === "sim") { simLink().write(bytes); return; }
+  const ch = link.rx;
+  if (!ch) return;
+  try {
+    const p = (ch.properties && ch.properties.writeWithoutResponse && ch.writeValueWithoutResponse)
+      ? ch.writeValueWithoutResponse(bytes)
+      : ch.writeValueWithResponse(bytes);
+    if (p && p.catch) p.catch((e) => { console.warn("write failed", e); });
+  } catch (e) { console.warn("write failed", e); }
+}
+
+/* ==========================================================================
+   app state
+   ========================================================================== */
+const UI = {
+  mode: -1, brakes: 0, height: null, pitch: 0, roll: 0,
+  pack: 0, current: 0, rpm: [0, 0, 0, 0], faults: 0,
+};
+
+const state = {
+  forced: false,          /* brakes forced by STOP */
+  leveling: true,
+  targetH: H_STANCE,
+  joy: { on: false, id: null, x: 0, y: 0, last: 0, captured: false },
+  lastTelem: 0,
+  demo: false,
+  demoReason: "",
+  nonce: 1,
+  lastTx: null,
+  txLog: [],
+  txWindow: [],
+  cmdMode: MODE_STAND,     /* last mode we commanded; gates the drive stream */
+  modeCmdAt: 0,
+  needMode: true,
+  needTrim: true,
+};
+
+const $ = (id) => document.getElementById(id);
+
+/* ---------------- connection ---------------- */
+const params = new URLSearchParams(location.search);
+const wantDemo = params.get("demo");
+const hasBT = !!navigator.bluetooth;
+state.demo = wantDemo === "1" || (wantDemo !== "0" && !hasBT);
+state.demoReason = wantDemo === "1" ? "demo=1 in the URL"
+  : !hasBT ? "no Web Bluetooth in this browser" : "";
+
+async function connect() {
+  if (state.demo) {
+    startSim(state.demoReason || "simulated robot");
+    return;
+  }
+  $("btnConnect").disabled = true;
+  try {
+    await bleConnect();
+    link.onTelem = onTelemetry;
+    link.onDown = hardDisconnect;
+    state.lastTelem = performance.now();
+    setPill("live", "LIVE");
+    $("statusText").textContent = (link.device.name || "robot") + " · ble";
+    $("btnConnect").classList.add("on");
+    $("connectLabel").textContent = "CONNECTED";
+    onLinkUp();
+  } catch (e) {
+    $("btnConnect").disabled = false;
+    const msg = friendlyBleError(e);
+    setPill("idle", "OFFLINE");
+    $("statusText").textContent = msg;
+    /* Bluetooth exists but cannot be used here (adapter off, blocked origin):
+       turn the button into the demo escape hatch. */
+    if (/demo only|https/i.test(msg)) {
+      state.demo = true;
+      state.demoReason = msg;
+      $("connectLabel").textContent = "DEMO";
+    }
+    console.warn("connect failed", e);
+  }
+}
+
+function friendlyBleError(e) {
+  const n = (e && e.name) || "";
+  const m = (e && e.message) || String(e || "");
+  if (n === "NotFoundError") return "no robot picked";
+  if (/user gesture|Must be handling/i.test(m)) return "tap CONNECT with a real tap";
+  if (/adapter|not available|Bluetooth is off/i.test(m)) return "Bluetooth is off — demo only";
+  if (n === "SecurityError" || /secure context/i.test(m)) return "needs https:// or localhost — demo only";
+  if (/cancel|abort/i.test(m)) return "connection cancelled";
+  return m.slice(0, 44);
+}
+
+function startSim(why) {
+  const s = simLink();
+  s.dead = false;
+  state.demo = true; state.demoReason = why;
+  link.onTelem = onTelemetry;
+  setPill("demo", "DEMO");
+  $("statusText").textContent = "simulated robot — " + why;
+  $("btnConnect").classList.add("on");
+  $("connectLabel").textContent = "DEMO";
+  $("btnConnect").disabled = true;
+  $("simDrop").classList.add("show");
+  onLinkUp();
+  s.write(modeFrame(MODE_STAND, flags(), nextNonce()));
+}
+
+function onLinkUp() {
+  state.forced = false;
+  state.cmdMode = MODE_STAND;
+  state.modeCmdAt = performance.now();
+  state.lastTelem = performance.now();
+  state.needMode = true; state.needTrim = true;
+  $("banner").classList.remove("show");
+  updateDriveLock();
+  startLoops();
+}
+
+function hardDisconnect(msg) {
+  link.ready = false;
+  if (link.kind === "ble") { link.device = null; link.rx = null; link.tx = null; }
+  releaseJoy();
+  $("btnConnect").disabled = false;
+  $("btnConnect").classList.remove("on");
+  $("connectLabel").textContent = state.demo ? "DEMO" : "CONNECT";
+  setPill(state.demo ? "demo" : "idle", state.demo ? "DEMO" : "OFFLINE");
+  $("statusText").textContent = msg || "link down";
+  $("linkLed").classList.remove("ok");
+  updateDriveLock();
+  stopLoops();
+}
+
+/* ---------------- telemetry ---------------- */
+let telemStale = false;
+
+function onTelemetry(bytes) {
+  const t = decodeTelemetry(bytes);
+  if (!t) return;
+  state.lastTelem = performance.now();
+  telemStale = false;
+  UI.mode = t.mode; UI.brakes = t.brakes; UI.height = t.height;
+  UI.pitch = t.pitch; UI.roll = t.roll; UI.pack = t.pack_mV;
+  UI.current = t.current_mA; UI.rpm = t.rpm; UI.faults = t.faults;
+
+  $("modeBig").textContent = MODE_NAME[t.mode] || "?";
+  $("modeBig").dataset.m = String(t.mode);
+  for (let i = 0; i < 4; i++) {
+    $("brakeDots").children[i].classList.toggle("on", !!(t.brakes & (1 << i)));
+  }
+  const n = [0, 1, 2, 3].filter((i) => t.brakes & (1 << i)).length;
+  $("brakeTxt").textContent = n + "/4";
+  $("vHeight").textContent = String(t.height);
+  $("vPitch").textContent = (t.pitch >= 0 ? "+" : "") + t.pitch.toFixed(1);
+  $("vRoll").textContent = (t.roll >= 0 ? "+" : "") + t.roll.toFixed(1);
+  $("vVolt").textContent = (t.pack_mV / 1000).toFixed(2);
+  $("vAmp").textContent = (t.current_mA / 1000).toFixed(2);
+  for (let i = 0; i < 4; i++) $("rpm" + i).textContent = String(t.rpm[i]);
+
+  if (state.forced) $("vCmd").textContent = "STOP";
+  else if (state.joy.on) $("vCmd").textContent = joySpeed() + " / " + joySteer();
+  else if (t.mode === MODE_DRIVE && state.cmdMode === MODE_DRIVE) $("vCmd").textContent = "0 / " + STEER_MID;
+  else $("vCmd").textContent = "—";
+
+  /* the robot wins on mode once a command has had time to land */
+  if (!state.forced && performance.now() - state.modeCmdAt > 1200 && t.mode !== state.cmdMode) {
+    state.cmdMode = t.mode;
+    updateDriveLock();
+  }
+
+  /* the robot's own mode drives the button highlight */
+  $("mStand").dataset.active = "0"; $("mDrive").dataset.active = "0"; $("mStow").dataset.active = "0";
+  if (!state.forced) {
+    const btn = [$("mStand"), $("mDrive"), $("mStow")][t.mode];
+    if (btn) btn.dataset.active = "1";
+  }
+
+  if (telemStale || $("banner").classList.contains("show")) {
+    $("banner").classList.remove("show");
+    $("telem").classList.remove("stale");
+    if (state.demo) $("statusText").textContent = "simulated robot — " + state.demoReason;
+  }
+  updateDriveLock();
+}
+
+/* ---------------- watchdog: 1.5 s without telemetry = stop ---------------- */
+let watchTimer = null;
+function startWatch() {
+  if (watchTimer) return;
+  watchTimer = setInterval(() => {
+    if (!link.ready) return;
+    const age = performance.now() - state.lastTelem;
+    if (age > 1500 && !telemStale) {
+      telemStale = true;
+      emergencyStop("TELEMETRY LOST — MOTORS STOPPED");
+      $("bannerText").textContent = "NO TELEMETRY FOR 1.5 s — MOTORS STOPPED";
+      $("banner").classList.add("show");
+      $("telem").classList.add("stale");
+      $("vCmd").textContent = "STOP";
+      $("mStand").dataset.active = "0"; $("mDrive").dataset.active = "0"; $("mStow").dataset.active = "0";
+      $("linkLed").classList.remove("ok");
+      $("statusText").textContent = "telemetry lost";
+    }
+  }, 100);
+}
+
+function emergencyStop(reason) {
+  state.forced = true;
+  releaseJoy();
+  const f = driveFrame(0, STEER_MID, flags() | F_BRAKES, nextNonce());
+  linkWrite(f); showTx(f);
+  updateDriveLock();
+  if (navigator.vibrate) navigator.vibrate([40, 60, 40]);
+}
+
+/* ---------------- transmit loop (20 Hz ceiling) ---------------- */
+let txTimer = null, telemTimer = null;
+
+function startLoops() {
+  startWatch();
+  if (!txTimer) txTimer = setInterval(txTick, 50);
+  if (!telemTimer) telemTimer = setInterval(() => {
+    /* 10 Hz telemetry in demo, exactly like the firmware */
+    if (link.kind === "sim" && link.ready) {
+      const s = link.sim;
+      if (s.dead) return;
+      const now = performance.now();
+      const dt = Math.min(0.1, (now - (s._last || now)) / 1000 || 0.02);
+      s._last = now;
+      s.tick(dt);
+      const bytes = encodeTelemetry(s.telemetry());
+      if (link.onTelem) link.onTelem(bytes);
+    }
+    const n = state.txWindow.filter((t) => performance.now() - t < 1000).length;
+    /* n stamps inside a 1 s window span n-1 whole intervals */
+    $("dbgRate").textContent = Math.max(0, n - 1) + " Hz";
+  }, 100);
+}
+
+function stopLoops() {
+  if (txTimer) { clearInterval(txTimer); txTimer = null; }
+  if (telemTimer) { clearInterval(telemTimer); telemTimer = null; }
+  if (watchTimer) { clearInterval(watchTimer); watchTimer = null; }
+}
+
+function txTick() {
+  if (!link.ready) return;
+
+  /* A stick whose pointer died (OS stole the capture, tab hidden, call
+     arrived) must never keep a speed alive. A stationary finger sends no
+     pointermove events, so "silence" is not evidence of a stuck stick: we
+     ask the browser whether the capture still belongs to us. */
+  if (state.joy.on) {
+    if (document.hidden) releaseJoy();
+    else if (state.joy.captured && !pad.hasPointerCapture(state.joy.id)) releaseJoy();
+  }
+
+  if (state.forced) { state.needMode = false; return; }
+
+  if (state.needMode) {
+    send(modeFrame(state.cmdMode, flags(), nextNonce()));
+    state.needMode = false;
+    /* the mode frame re-states the robot's stance; put our trim back after it */
+    if (state.needTrim) { state.needTrim = false; sendTrim(); }
+    return;
+  }
+  if (state.needTrim) { state.needTrim = false; sendTrim(); return; }
+
+  /* In DRIVE the frame repeats at 20 Hz: it doubles as the firmware's
+     link watchdog and guarantees a zero is sent the moment the stick frees.
+     The stream is gated on the mode WE commanded, not on the last telemetry
+     frame — otherwise it would fight a STOW that is still in flight. */
+  if (state.cmdMode === MODE_DRIVE) {
+    send(driveFrame(joySpeed(), joySteer(), flags(), nextNonce()));
+  }
+}
+
+function send(frame) {
+  linkWrite(frame);
+  showTx(frame);
+}
+
+function nextNonce() { return (state.nonce = (state.nonce + 1) >>> 0); }
+function flags() {
+  return (state.forced ? F_BRAKES : 0) | (state.leveling ? F_LEVEL : 0);
+}
+
+function sendTrim() {
+  const off = trimOffsetFor(state.targetH);
+  for (let hip = 0; hip < 4; hip++) send(trimFrame(hip, off, flags(), nextNonce()));
+}
+
+function showTx(frame) {
+  state.lastTx = frame;
+  state.txWindow.push(performance.now());
+  if (state.txWindow.length > 60) state.txWindow.shift();
+  state.txLog.push(hex(frame));
+  if (state.txLog.length > 40) state.txLog.shift();
+  $("txHex").innerHTML = "<b>TX</b> " + hex(frame);
+}
+
+/* ---------------- joystick ---------------- */
+const pad = $("pad"), knob = $("knob");
+
+function joySpeed() { return state.joy.on ? Math.round(-state.joy.y * SPEED_MAX_MMS) : 0; }
+function joySteer() { return state.joy.on ? Math.max(0, Math.min(255, Math.round(STEER_MID + state.joy.x * 127))) : STEER_MID; }
+function canDrive() { return link.ready && !state.forced && state.cmdMode === MODE_DRIVE; }
+
+function updateDriveLock() {
+  const ok = canDrive();
+  pad.classList.toggle("off", !ok);
+  pad.dataset.lock = ok ? "0" : "1";
+  $("joyHint").textContent = ok ? (state.joy.on ? "release to centre" : "drag to drive")
+    : state.forced ? "stopped — press DRIVE" : state.cmdMode === MODE_DRIVE ? "waiting for telemetry" : "drive mode to unlock";
+}
+
+function padPointer(ev) {
+  const r = pad.getBoundingClientRect();
+  const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+  const rad = Math.min(r.width, r.height) / 2 - 8;
+  let dx = (ev.clientX - cx) / rad, dy = (ev.clientY - cy) / rad;
+  const d = Math.hypot(dx, dy);
+  if (d > 1) { dx /= d; dy /= d; }
+  const mag = Math.hypot(dx, dy);
+  const DEAD = 0.11;
+  if (mag < DEAD) { dx = 0; dy = 0; }
+  else {
+    /* rescale past the deadzone so the stick is usable from the first millimetre */
+    const k = (mag - DEAD) / (1 - DEAD) / mag;
+    dx *= k; dy *= k;
+  }
+  state.joy.x = dx; state.joy.y = dy;
+  state.joy.last = performance.now();
+  knob.style.transform = "translate(-50%,-50%) translate(" + (dx * rad) + "px," + (dy * rad) + "px)";
+  $("vCmd").textContent = joySpeed() + " / " + joySteer();
+}
+
+function releaseJoy() {
+  state.joy.on = false;
+  state.joy.id = null;
+  state.joy.captured = false;
+  state.joy.x = 0; state.joy.y = 0;
+  pad.classList.remove("active");
+  knob.style.transform = "translate(-50%,-50%)";
+  updateDriveLock();
+  /* one explicit zero so a released stick stops the wheels immediately */
+  if (link.ready && !state.forced && state.cmdMode === MODE_DRIVE) {
+    send(driveFrame(0, STEER_MID, flags(), nextNonce()));
+  }
+}
+
+pad.addEventListener("pointerdown", (ev) => {
+  if (!canDrive()) {
+    pad.animate?.([{ transform: "translateX(0)" }, { transform: "translateX(-4px)" }, { transform: "translateX(4px)" }, { transform: "translateX(0)" }], 180);
+    return;
+  }
+  ev.preventDefault();
+  state.joy.on = true;
+  state.joy.id = ev.pointerId;
+  state.joy.captured = false;
+  pad.classList.add("active");
+  try { pad.setPointerCapture(ev.pointerId); state.joy.captured = pad.hasPointerCapture(ev.pointerId); } catch (_) {}
+  padPointer(ev);
+  updateDriveLock();
+});
+pad.addEventListener("pointermove", (ev) => {
+  if (!state.joy.on || ev.pointerId !== state.joy.id) return;
+  ev.preventDefault();
+  padPointer(ev);
+});
+["pointerup", "pointercancel", "lostpointercapture", "pointerleave"].forEach((t) => {
+  pad.addEventListener(t, (ev) => {
+    if (!state.joy.on || (ev.pointerId !== undefined && ev.pointerId !== state.joy.id)) return;
+    releaseJoy();
+  });
+});
+window.addEventListener("blur", () => { if (state.joy.on) releaseJoy(); });
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) { if (state.joy.on) releaseJoy(); if (state.joy.on) emergencyStop(); }
+});
+
+/* ---------------- mode buttons ---------------- */
+function requestMode(m) {
+  if (!link.ready) return;
+  if (m === MODE_STOW) {
+    confirmDialog("Stow WHEELBOT?",
+      "The arms swing up 36°, all four brakes engage and the body settles onto its feet. It will not drive again until you press DRIVE.",
+      () => applyMode(MODE_STOW));
+    return;
+  }
+  if (m === MODE_DRIVE && telemStale) {
+    confirmDialog("No telemetry", "The robot is not reporting. Sending a mode command anyway?",
+      () => applyMode(MODE_DRIVE));
+    return;
+  }
+  applyMode(m);
+}
+
+function applyMode(m) {
+  if (!link.ready) return;
+  releaseJoy();
+  state.forced = false;
+  state.needMode = false;
+  state.cmdMode = m;
+  state.modeCmdAt = performance.now();
+  send(modeFrame(m, flags(), nextNonce()));
+  state.needTrim = false;                      /* keep the commanded height */
+  if (m !== MODE_STOW) sendTrim();             /* stow overrides height, so skip it */
+  if (navigator.vibrate) navigator.vibrate(12);
+  $("vCmd").textContent = MODE_NAME[m];
+}
+
+$("mStand").addEventListener("click", () => requestMode(MODE_STAND));
+$("mDrive").addEventListener("click", () => requestMode(MODE_DRIVE));
+$("mStow").addEventListener("click", () => requestMode(MODE_STOW));
+
+/* ---------------- ride height / level ---------------- */
+const ride = $("ride");
+ride.addEventListener("input", () => {
+  state.targetH = Number(ride.value);
+  $("rideVal").innerHTML = state.targetH + '<span style="font-size:9px;color:#8296a8"> mm</span>';
+  state.needTrim = true;
+  updateDriveLock();
+});
+
+$("lvBtn").addEventListener("click", () => {
+  state.leveling = !state.leveling;
+  $("lvBtn").classList.toggle("on", state.leveling);
+  $("lvBtn").setAttribute("aria-pressed", String(state.leveling));
+  if (link.ready) { state.needMode = true; state.needTrim = true; }   /* flags travel on the next frame */
+});
+
+/* ---------------- STOP ---------------- */
+$("stopBtn").addEventListener("click", () => {
+  emergencyStop("stopped");
+  $("stopBtn").classList.add("armed");
+  setTimeout(() => $("stopBtn").classList.remove("armed"), 700);
+  $("vCmd").textContent = "STOP";
+});
+
+/* ---------------- connect button ---------------- */
+$("btnConnect").addEventListener("click", connect);
+
+/* ---------------- modal ---------------- */
+let modalAction = null;
+function confirmDialog(title, body, onYes) {
+  $("modalTitle").textContent = title;
+  $("modalBody").textContent = body;
+  modalAction = onYes;
+  $("modal").classList.add("show");
+}
+$("modalNo").addEventListener("click", () => { $("modal").classList.remove("show"); modalAction = null; });
+$("modalYes").addEventListener("click", () => {
+  $("modal").classList.remove("show");
+  const a = modalAction; modalAction = null;
+  if (a) a();
+});
+$("modal").addEventListener("click", (e) => { if (e.target === $("modal")) { $("modal").classList.remove("show"); modalAction = null; } });
+
+/* ---------------- camera ---------------- */
+const camPanel = $("camPanel"), video = $("camVideo"), camMsg = $("camMsg");
+let stream = null, camBusy = false;
+
+async function camStart() {
+  if (camBusy) return;
+  camBusy = true;
+  camMsg.textContent = "asking permission…";
+  try {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error("no camera API");
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } },
+      audio: false,
+    });
+    video.srcObject = stream;
+    await video.play().catch(() => {});
+    camPanel.classList.add("live");
+    $("camToggle").textContent = "CAM OFF";
+    $("camShot").disabled = false;
+    const s = stream.getVideoTracks()[0];
+    const st = s && s.getSettings ? s.getSettings() : {};
+    camMsg.textContent = "live" + (st.width ? " · " + st.width + "x" + st.height : "") + (s && s.label ? " · " + s.label.slice(0, 26) : "");
+  } catch (e) {
+    const name = (e && e.name) || "Error";
+    const map = {
+      NotAllowedError: "Camera permission denied. Allow it in the browser's site settings, then tap CAM ON again.",
+      NotFoundError: "No camera on this device.",
+      NotReadableError: "Camera is busy in another app.",
+      OverconstrainedError: "No rear camera — try again.",
+      SecurityError: "Camera needs https:// or localhost.",
+    };
+    camMsg.textContent = map[name] || ("Camera failed: " + name);
+    camPanel.classList.remove("live");
+    $("camToggle").textContent = "CAM ON";
+    $("camShot").disabled = true;
+    stream = null;
+  } finally { camBusy = false; }
+}
+
+function camStop() {
+  if (stream) stream.getTracks().forEach((t) => t.stop());
+  stream = null;
+  video.srcObject = null;
+  camPanel.classList.remove("live", "big");
+  $("camToggle").textContent = "CAM ON";
+  $("camShot").disabled = true;
+  camMsg.textContent = "Rear camera · off";
+}
+
+$("camToggle").addEventListener("click", () => { stream ? camStop() : camStart(); });
+
+$("camShot").addEventListener("click", () => {
+  if (!stream || !video.videoWidth) return;
+  const c = document.createElement("canvas");
+  c.width = video.videoWidth; c.height = video.videoHeight;
+  c.getContext("2d").drawImage(video, 0, 0);
+  const flash = $("shotFlash");
+  flash.style.opacity = ".85";
+  setTimeout(() => { flash.style.opacity = "0"; }, 110);
+  c.toBlob((blob) => {
+    if (!blob) return;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const d = new Date();
+    const pad2 = (n) => String(n).padStart(2, "0");
+    a.href = url;
+    a.download = "wheelbot-" + d.getFullYear() + pad2(d.getMonth() + 1) + pad2(d.getDate()) + "-" +
+      pad2(d.getHours()) + pad2(d.getMinutes()) + pad2(d.getSeconds()) + ".jpg";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    camMsg.textContent = "saved " + c.width + "x" + c.height + " still";
+  }, "image/jpeg", 0.92);
+});
+
+$("camBox").addEventListener("click", () => {
+  if (!camPanel.classList.contains("big")) camPanel.classList.add("big");
+  else camPanel.classList.remove("big");
+});
+
+/* ---------------- status pill ---------------- */
+function setPill(kind, label) {
+  const p = $("modePill");
+  p.className = "pill " + kind;
+  p.textContent = label;
+  $("linkLed").classList.toggle("ok", kind === "live" || kind === "demo");
+}
+
+/* ---------------- demo: rehearse a link drop ---------------- */
+$("simDrop").addEventListener("click", () => {
+  if (!state.demo || !link.sim) return;
+  if (!link.sim.dead) {
+    link.sim.dead = true;
+    state.lastTelem = performance.now() - 1500;   /* force the watchdog on the next tick */
+    $("statusText").textContent = "simulated link drop…";
+    $("simDrop").textContent = "sim link up";
+  } else {
+    link.sim.dead = false;
+    state.lastTelem = performance.now();
+    $("simDrop").textContent = "sim link drop";
+    $("statusText").textContent = "simulated link back — press DRIVE";
+  }
+});
+
+/* ---------------- boot ---------------- */
+(function boot() {
+  setPill(state.demo ? "demo" : "idle", state.demo ? "DEMO" : "OFFLINE");
+  $("statusText").textContent = state.demo
+    ? "simulated robot — " + state.demoReason
+    : hasBT ? "tap CONNECT, pick WHEELBOT" : "no Web Bluetooth — demo only";
+  $("btnConnect").disabled = false;
+  $("rideVal").innerHTML = state.targetH + '<span style="font-size:9px;color:#8296a8"> mm</span>';
+  updateDriveLock();
+  if (state.demo) startSim(state.demoReason);
+})();
+
+/* Exposed for the offline self-test / a builder with a console. */
+window.WHEELBOT = {
+  crc16ccitt, buildFrame, driveFrame, modeFrame, trimFrame, decodeTelemetry, encodeTelemetry,
+  state, UI, sim: () => link.sim,
+};
+</script>
+</body>
+</html>
