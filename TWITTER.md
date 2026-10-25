@@ -3,6 +3,10 @@
 Three lengths. Numbers are the machine's own (model.mjs), so they can be checked against the
 repo. Swap the link once the repository is public.
 
+**Attach `renders/wheelbot-twitter.gif`** to any of these — 1280×720, 9 s, 9.6 MB (under the 15 MB
+GIF limit). It opens on the interactive figure, then shows the four Blender clips as a 2×2 grid:
+walk, turret, drive, stand. Rebuild it with `bash blender/twitter-gif.sh`.
+
 ---
 
 ## 1. The one that leads with the idea (recommended)
