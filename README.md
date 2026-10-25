@@ -2,9 +2,8 @@
 
 ![WHEELBOT W1: a four-legged robot whose wheels are its feet and whose brain is the phone in its dock](renders/hero-readme.png)
 
-> Prices are in US dollars for an English-speaking reader. The bill of materials is kept in
-> the roubles the parts were actually bought for and converted once, at **90 RUB to the
-dollar** — the rate is stated so the arithmetic can be checked, not hidden in a total.
+> Prices are dollar estimates from AliExpress listings in October 2026. Press any row in the
+> figure's cost panel to search the current one — the table is an estimate, not a quote.
 
 A four-legged robot whose brain is the phone in its dock and whose feet are wheels. Each leg is
 two 40 mm links — thigh at 45°, shin hanging from the knee — and each hub carries six slots with a
@@ -68,7 +67,7 @@ Computed by `figures/phonebot/model.mjs` and the bill; nothing here is typed in 
 | Brake dog shear at motor stall | 0.27 MPa against ~45 MPa PETG |
 | Peak draw | 4.8 A at 6 V, 8 A buck |
 | Pack | 2S 18650, 3500 mAh, 25.9 Wh |
-| Cost, everything but the phone | **$121** — $40 electrical, $81 mechanical |
+| Cost, everything but the phone | **$120** — $40 electrical, $80 mechanical |
 
 Prices are AliExpress, October 2026, and move daily; each row in the figure's cost panel links to
 its own search.

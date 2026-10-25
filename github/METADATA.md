@@ -7,7 +7,7 @@ the text around the code.
 
 ```
 A four-legged robot whose wheels are also its feet and whose brain is the phone in its dock.
-1.5 kg, $121 in commodity parts, 3D-printable, ESP32 firmware, one-file phone app.
+1.5 kg, $120 in commodity parts, 3D-printable, ESP32 firmware, one-file phone app.
 ```
 
 ## Topics
@@ -42,7 +42,7 @@ cameras forward, and does the thinking over BLE.
 - `docs/` — assembly, wiring, use, the change note for the two-link leg, and `ARTICLE.md`.
 
 **Numbers** — 1.31 kg bare, 1.51 kg with a phone; 0.503 m/s driving; 42 mm stride and 35 mm/s
-walking; 2.6 h driving while charging the phone; 19.4 h standing; $121 without the phone.
+walking; 2.6 h driving while charging the phone; 19.4 h standing; $120 without the phone.
 
 **Known gaps, stated rather than hidden**
 

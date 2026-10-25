@@ -40,9 +40,9 @@ the brake is spring-engaged.
 
 | Mode | App label | What the machine is doing | When to use it |
 |---|---|---|---|
-| STAND | Стоять (Stand) | All four dog clutches engaged by their springs; the four wheels are feet; the four MG996Rs hold a level body. No current in the brake servos. | Default. Any time it is not moving. On a table, on a shelf, in a photo. |
-| DRIVE | Ехать (Drive) | The four SG90s pull the forks back 6 mm against their springs; the collars clear the slots; the four N20s drive. Skid steer — differential speed, spin in place. | Flat hard floor. Short bursts on carpet. |
-| STOW | Сложить (Stow) | Arms swing up 36°, brakes engaged, body rests on the four rubber feet under the lower deck. | Carrying it. Lift by the handle, not by a leg. |
+| STAND | Stand | All four dog clutches engaged by their springs; the four wheels are feet; the four MG996Rs hold a level body. No current in the brake servos. | Default. Any time it is not moving. On a table, on a shelf, in a photo. |
+| DRIVE | Drive | The four SG90s pull the forks back 6 mm against their springs; the collars clear the slots; the four N20s drive. Skid steer — differential speed, spin in place. | Flat hard floor. Short bursts on carpet. |
+| STOW | Stow | Arms swing up 36°, brakes engaged, body rests on the four rubber feet under the lower deck. | Carrying it. Lift by the handle, not by a leg. |
 
 Ride height inside STAND is adjustable across hip 79–91 mm, which drops or raises the body by
 68·cos θ − 64 mm at the arm angle you pick. Higher is better for carpet, lower is better for

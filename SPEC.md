@@ -1,8 +1,7 @@
 # WHEELBOT W1 — design record
 
-> Prices are in US dollars for an English-speaking reader. The bill of materials is kept in
-> the roubles the parts were actually bought for and converted once, at **90 RUB to the
-dollar** — the rate is stated so the arithmetic can be checked, not hidden in a total.
+> Prices are dollar estimates from AliExpress listings in October 2026. Press any row in the
+> figure's cost panel to search the current one — the table is an estimate, not a quote.
 
 A four-legged phone robot. The phone is the brain and the only expensive part; everything
 else is a commodity part from a hobby-shop basket. Inspired by PhoneBot (phonebot.dev),
@@ -72,7 +71,7 @@ one, the outer one carries the brake servo and the collar.
 | Runtime, walking | 1.8 h | |
 | Runtime, standing with brakes locked | 19.4 h | |
 | Peak draw | 4.8 A average at 6 V | 8 A buck |
-| Cost, everything but the phone | $121 — $40 electrical, $81 mechanical | bom.mjs, priced 10.2026 |
+| Cost, everything but the phone | $120 — $40 electrical, $80 mechanical | bom.mjs, priced 10.2026 |
 
 ## Modes
 

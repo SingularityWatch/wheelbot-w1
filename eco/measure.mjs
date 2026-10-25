@@ -1,4 +1,4 @@
-// Габариты and a machine-readable dump of the geometry.
+// The bounding boxes and a machine-readable dump of the geometry.
 //
 // Both come from the same place: `boundsOf` over the shapes the recorder holds, which are
 // the true shapes the figure was drawn from. So the sizes in the card and the numbers in
@@ -26,7 +26,7 @@ export function boxOfShapes(shapes, box = { lo: [...LO], hi: [...HI] }) {
 export const extentsOf = (box) => ({ w: box.hi[0] - box.lo[0], d: box.hi[1] - box.lo[1], h: box.hi[2] - box.lo[2] });
 
 /**
- * The sizes the card's «Размеры» control shows, in world units (the page prints cm):
+ * The sizes the card's sizes control shows, in world units (the page prints cm):
  * the whole figure, and one row per group of named parts.
  * A group matches an item when the item's name equals the group's name or starts with it
  * followed by a dot, so `frame` catches `frame.post` but not `frame-something`.

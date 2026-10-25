@@ -55,7 +55,7 @@ same camera look ahead, aside, or back at you.
 | Brake | 6 dogs, 12 mm mean radius, 3 mm engagement; shear 0.27 MPa against ~45 MPa PETG |
 | Battery | 2S 18650, 3500 mAh, 25.9 Wh |
 | Runtime | 2.6 h driving and charging the phone, 19.4 h standing |
-| Bill of materials | **$121**, phone excluded |
+| Bill of materials | **$120**, phone excluded |
 
 Every one of those numbers is produced by `figure/model.mjs`; the drawing, the readout in the page,
 the BOM total and the 3D export all read it, so they cannot drift apart.

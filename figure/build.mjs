@@ -8,7 +8,7 @@ import * as G from "../../kit/lathe.mjs";
 import { tubePieces, tubeSvg } from "../../kit/tube.mjs";
 import * as A from "../../kit/audit.mjs";
 import { kitScript } from "../../scripts/inline-kit.mjs";
-import { BOM, SEARCH, PRICED_ON, RUB_PER_USD, usd, rowTotal, bomTotal, electronicsTotal, WHAT_HUB_PAYS, WHAT_HUB_PAYS_EN } from "./bom.mjs";
+import { BOM, SEARCH, PRICED_ON, usd, rowTotal, bomTotal, electronicsTotal, WHAT_HUB_PAYS_EN } from "./bom.mjs";
 import { RU, EN } from "./lang.mjs";
 import * as M from "./model.mjs";
 import { MM_PER_UNIT, cm1 } from "../../eco/units.mjs";
@@ -627,7 +627,7 @@ const SIZE_GROUPS = [
   { name: "elec", en: "Electronics and power" },
 ];
 const SIZES = sizesOf(ITEMS, SIZE_GROUPS);
-const PARTS = partsJson(ITEMS, { title: "Колесо-нога: телефон как мозг" });
+const PARTS = partsJson(ITEMS, { title: "Wheel-foot: the phone is the brain" });
 writeFileSync(join(HERE, "parts.json"), JSON.stringify(PARTS, null, 1) + "\n");
 
 // ---------------------------------------------------------------- the card
@@ -656,23 +656,23 @@ const money = (value) => (Math.round(value * 100) / 100).toLocaleString("ru-RU",
 const itemsOfBom = new Map();
 for (const row of STUDY) if (row.bom) itemsOfBom.set(row.bom, [...(itemsOfBom.get(row.bom) ?? []), row.item]);
 const costRows = BOM.map((row) => {
-  const unit = { pc: ["шт", "pc"], g: ["г", "g"] }[row.unit] ?? [row.unit, row.unit];
+  const unit = row.unit;
   return `<li data-items="${(itemsOfBom.get(row.id) ?? []).join(" ")}"><a class="pt-cost-link" href="${SEARCH(row.q)}" target="_blank" rel="noopener noreferrer">`
     + `<b>${row.en.name}</b>`
     + `<span class="pt-cost-sum">${usd(rowTotal(row))}</span>`
     + `<span class="pt-cost-spec">${row.en.spec}</span>`
-    + `<span class="pt-cost-qty">${row.qty} ${unit[1]} × ${usd(row.price)}</span>`
-    + `</a><em><span lang="ru">диапазон ${row.range ? usd(row.range[0]) + "–" + usd(row.range[1]).slice(1) : ""}</span><span lang="en">range ${row.range ? usd(row.range[0]) + "–" + usd(row.range[1]).slice(1) : ""}</span></em></li>`;
+    + `<span class="pt-cost-qty">${row.qty} ${unit} × ${usd(row.price)}</span>`
+    + `</a><em>range ${row.range ? usd(row.range[0]) + "–" + usd(row.range[1]).slice(1) : ""}</em></li>`;
 }).join("");
 const costHtml = `<aside class="pt-cost" id="pt-cost" aria-label="Cost">
-  <header><span>What the robot costs</span><span class="pt-cost-when">AliExpress prices on ${PRICED_ON}, converted at ${RUB_PER_USD} RUB to the dollar</span></header>
+  <header><span>What the robot costs</span><span class="pt-cost-when">AliExpress listings, ${PRICED_ON}</span></header>
   <ol>${costRows}</ol>
   <footer>
     <span>Electrical and power</span><b>${usd(electronicsTotal())}</b>
     <span>Mechanics and printing</span><b>${usd(bomTotal() - electronicsTotal())}</b>
     <span>Total, without the phone</span><b>${usd(bomTotal())}</b>
   </footer>
-  <p class="pt-cost-note">${bi(WHAT_HUB_PAYS, WHAT_HUB_PAYS_EN)}</p>
+  <p class="pt-cost-note">${WHAT_HUB_PAYS_EN}</p>
   <p class="pt-cost-note">Indicative: prices move every day and depend on the region. Press a row to search AliExpress.</p>
 </aside>`;
 
@@ -873,7 +873,6 @@ const CSS = `<style>
 .pt-dim-text{fill:var(--anatomy-hi);font:500 9.5px var(--anatomy-mono)}
 .pt-stage{position:relative;display:grid;touch-action:pan-y;--pt-zoom:1;padding-bottom:56px;width:min(100%,700px);margin:0 auto}
 html:not([data-lang="en"]) [lang="en"]{display:none}
-html[data-lang="en"] [lang="ru"]{display:none}
 .iso-plate-corner[data-corner="readout"]{bottom:18px;max-width:72%;white-space:normal;text-align:right;line-height:1.4}
 .pt-stage>*{grid-area:1/1;position:relative}
 .pt-back{z-index:0}

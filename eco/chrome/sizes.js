@@ -1,4 +1,3 @@
-// The card's «Размеры» control, shared by every figure in the ecosystem.
 //
 // The panel beside the drawing is build-time HTML (both languages, switched by one
 // attribute), so this module only has to do two things: flip the state the panel and the
@@ -47,7 +46,7 @@ function mountSizes({ stage, front, P, sizes, markLayers = [], onToggle }) {
     const value = units * sizes.mmPerUnit / 10;
     return Math.round(value * 10) / 10;
   };
-  const ru = (units) => `${cm(units).toFixed(1).replace(".", ",")} см`;
+  const ru = (units) => `${cm(units).toFixed(1).replace(".", ",")} cm`;
   const en = (units) => `${cm(units).toFixed(1)} cm`;
 
   const line = (a, b, cls = "pt-dim-line") => {

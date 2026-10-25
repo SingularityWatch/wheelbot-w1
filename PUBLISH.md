@@ -38,7 +38,7 @@ git push -u origin main
 **About / description:**
 
 > A four-legged robot whose wheels are also its feet and whose brain is the phone in its dock.
-> 1.5 kg, $121 in commodity parts, 3D-printable, ESP32 firmware, one-file phone app.
+> 1.5 kg, $120 in commodity parts, 3D-printable, ESP32 firmware, one-file phone app.
 
 **Topics:** `robotics` `quadruped` `smartphone` `opensource-hardware` `esp32` `3dprinting`
 `web-bluetooth` `mechanism` `dog-clutch`

@@ -18,6 +18,6 @@ export const toCm = (units) => toMm(units) / 10;
 /** Centimetres to one decimal, the way a spec sheet prints them. */
 export const cm1 = (units) => Math.round(toCm(units) * 10) / 10;
 /** A size read as `84 × 52 × 44`, in centimetres. */
-export const cmTriple = ({ w, d, h }) => `${cm1(w)} × ${cm1(d)} × ${cm1(h)} см`;
-/** Centimetres in the reader's units: `см` or `cm`. */
-export const cmUnit = (ru) => (ru ? "см" : "cm");
+export const cmTriple = ({ w, d, h }) => `${cm1(w)} × ${cm1(d)} × ${cm1(h)} cm`;
+/** The centimetre unit the page prints. */
+export const cmUnit = () => "cm";
